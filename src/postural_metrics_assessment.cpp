@@ -17,6 +17,10 @@
 #include <nlohmann/json.hpp>
 #include <pugg/Kernel.h>
 // other includes as needed here
+#include <vector>
+#include <array>
+#include <Eigen/Dense>
+#include <fstream>
 
 // Define the name of the plugin
 #ifndef PLUGIN_NAME
@@ -34,12 +38,74 @@ class Postural_metrics_assessmentPlugin : public Filter<json, json> {
 
 public:
 
+  return_type compute_baricenter() {
+    /*
+    Compute the baricenter (center of mass) of the joint positions.
+    TODO: Implement the actual computation logic. Current implementation is just the average of the joint positions.
+    */
+
+    if (_positions.empty()) {
+      _error = "No joint positions available for center of mass computation.";
+      return return_type::retry;
+    }
+
+    Eigen::Vector3d com = Eigen::Vector3d::Zero();
+    for (const auto &pos : _positions) {
+      com += pos;
+    }
+    com /= _positions.size();
+
+    // Store the computed center of mass
+    _com = com;
+    return return_type::success;
+  }
+
+
   // Typically, no need to change this
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "") override {
-    // Do something with the input data
+
+    cout << "Loading data" << endl;
+    
+    // Check if input is of type "FSD" since we only use Merged Skeletons
+    if (!input.contains("typ") || input["typ"] != "FSD") {
+      _error = "Input data is not a FSD";
+      cout << _error << endl;
+      return return_type::retry;
+    }
+    
+    cout << "Input data is of type FSD." << endl;
+
+    
+    // store the global timestamp of the input data
+    if (input.contains("ts")) {
+      _timestamp = input["ts"].get<int64_t>();
+      cout << "Input data timestamp: " << _timestamp << endl;
+    } else {
+        _error = "Input data does not contain 'ts'.";
+        cout << _error << endl;
+        return return_type::retry;
+    }
+
+    // retrieve the skeleton data just received and update the covariance matrix and joint positions
+    for(const auto &[label, data] : input.items()) {
+      if(data.contains("crd") && data.contains("unc")){
+        int joint_index = keypoints_map_string2int[label]; // joint index
+
+        _positions[joint_index]= Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]);
+
+        Eigen::Matrix3d covariance_matrix = Eigen::Matrix3d::Zero();
+        covariance_matrix << data["unc"][0], data["unc"][3], data["unc"][4],
+                             data["unc"][3], data["unc"][1], data["unc"][5],
+                             data["unc"][4], data["unc"][5], data["unc"][2];
+        _covariances[joint_index] = covariance_matrix;
+
+      }  
+    }
+
+    cout << "Updated joint positions and covariances." << endl;
     return return_type::success;
   }
 
@@ -48,6 +114,9 @@ public:
   return_type process(json &out) override {
     out.clear();
 
+    compute_baricenter();
+    std::cout << "Center of mass: " << _com.transpose() << std::endl;
+    
     // load the data as necessary and set the fields of the json out variable
 
     // This sets the agent_id field in the output json object, only when it is
@@ -61,13 +130,31 @@ public:
     // (e.g. agent_id, etc.)
     Filter::set_params(params);
 
-    // provide sensible defaults for the parameters by setting e.g.
-    _params["some_field"] = "default_value";
-    // more here...
+    // then merge the defaults with the actually provided parameters
+    // params needs to be cast to json
+    _params.merge_patch(*(json *)params);
+
+    std::vector<std::string> joint_map = { 
+      "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL",
+      "HIPR","KNER","ANKR","HIPL","KNEL","ANKL",
+      "EYER","EYEL","EARR","EARL"
+    }; // default joint map 
+
+    // creates two maps to faciliate indexing the joints by name and index
+    for (size_t i = 0; i < joint_map.size(); ++i) {
+      keypoints_map_string2int[joint_map[i]] = i;
+      keypoints_map_int2string[i] = joint_map[i];
+    }
+
+    // initialize the internal vectors based on the number of cameras
+    size_t num_joints = _params["joint_map"].size();
+    _positions.resize(num_joints);
+    _covariances.resize(num_joints);
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
     _params.merge_patch(*(json *)params);
+
   }
 
   // Implement this method if you want to provide additional information
@@ -79,7 +166,16 @@ public:
   };
 
 private:
-  // Define the fields that are used to store internal resources
+  // Maps the joint names to their indices
+  map<string, int> keypoints_map_string2int;
+  map<int, string> keypoints_map_int2string;
+
+  int64_t _timestamp = 0; // global timestamp of the input data
+
+  std::vector<Eigen::Vector3d> _positions; // _positions[j] is the position (x,y,z) of the j-th joint.
+  std::vector<Eigen::Matrix3d> _covariances;  // _covariances[j] is the covariance matrix of the j-th joint.
+
+  Eigen::Vector3d _com;  // Center of mass (COM) of the joint positions
 };
 
 
@@ -108,7 +204,7 @@ int main(int argc, char const *argv[])
 {
   Postural_metrics_assessmentPlugin plugin;
   json params;
-  json input, output;
+  json all_inputs, input, output;
 
   // Set example values to params
   params["test"] = "value";
@@ -117,20 +213,28 @@ int main(int argc, char const *argv[])
   plugin.set_params(&params);
 
   // Set input data
-  input["data"] = {
-    {"AX", 1},
-    {"AY", 2},
-    {"AZ", 3}
-  };
+  // read dummy json file
+  ifstream input_file("dummy/hpe_inputs.json");
+  if (input_file.is_open()) {
+    input_file >> all_inputs;
+    input_file.close();
+  } else {
+    cerr << "Unable to open input file" << endl;
+    return 1;
+  }
 
-  // Set input data
-  plugin.load_data(input);
-  cout << "Input: " << input.dump(2) << endl;
+  int input_count = 0;
+  for (const auto& input : all_inputs) {
+    input_count++;
+    cout << "Processing input #" << input_count << ": " << input.dump(2) << endl;
 
-  // Process data
-  plugin.process(output);
-  cout << "Output: " << output.dump(2) << endl;
+    // Set input data
+    plugin.load_data(input);
 
+    // Process data
+    plugin.process(output);
+    cout << "Output: " << output.dump(2) << endl;
+  }
 
   return 0;
 }

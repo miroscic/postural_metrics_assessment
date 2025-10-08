@@ -11,7 +11,7 @@
 # Creation date: 2025-10-08T10:39:22.525+0200
 # NOTICE: MADS Version v1.3.2
 cmake_minimum_required(VERSION 3.20)
-project(postural_metrics_assessment VERSION v1.3.2 LANGUAGES CXX)
+project(postural_metrics_assessment VERSION 1.3.2 LANGUAGES CXX)
 if(CMAKE_BUILD_TYPE STREQUAL "")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
@@ -45,6 +45,12 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
+FetchContent_Declare(eigen
+  GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+  GIT_TAG 3.4.0
+  GIT_SHALLOW TRUE
+)
+
 set(BUILD_TESTING OFF CACHE INTERNAL "")
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_Declare(json
@@ -53,7 +59,7 @@ FetchContent_Declare(json
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(pugg json)
+FetchContent_MakeAvailable(pugg json eigen)
 
 FetchContent_Populate(plugin 
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
@@ -110,7 +116,7 @@ endif()
 include_directories(${json_SOURCE_DIR}/include)
 
 # These plugins are always build and use for testing
-add_plugin(postural_metrics_assessment)
+add_plugin(postural_metrics_assessment LIBS Eigen3::Eigen)
 
 
 # INSTALL ######################################################################
