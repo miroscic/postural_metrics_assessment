@@ -35,16 +35,73 @@ cmake --install build --config Release
 ```
 
 
+
+
+## Input and Output
+
+### Input
+The plugin accepts as input a JSON object with the following structure (simplified example):
+
+```json
+{
+  "typ": "FSD",
+  "ts": <timestamp>,
+  "message": {
+    "JOINT_NAME": {
+      "crd": [x, y, z],
+      "unc": [var_x, var_y, var_z, cov_xy, cov_xz, cov_yz]
+    },
+    ...
+  }
+}
+```
+- `typ`: must be "FSD".
+- `ts`: global timestamp.
+- `message`: a map where the key is the joint name (e.g., "NEC_", "SHOR", etc.), and the value is an object with:
+  - `crd`: 3D coordinates of the joint (in millimeters, internally converted to meters).
+  - `unc`: uncertainties/covariances (currently not used).
+
+
+### Output
+The output is a JSON object with the following metrics:
+
+```json
+{
+  "horiz_reach_left": <float>,
+  "horiz_reach_right": <float>,
+  "vert_reach_left": <float>,
+  "vert_reach_right": <float>,
+  "cervical_flex": <float>,
+  "stability_margin": <float>,
+  "back_rot": <float>,
+  "back_flex": <float>,
+  "back_bend": <float>,
+  "agent_id": <string> (optional)
+}
+```
+
+#### Meaning of metrics and angle explanation
+- **horiz_reach_left / right**: horizontal distance (in the XZ plane) between the left/right wrist and the body center of mass.
+- **vert_reach_left / right**: angle (in degrees) between the arm (shoulder-elbow) and the trunk, with respect to the vertical axis. Indicates how much the arm is raised relative to the trunk.
+- **cervical_flex**: angle (in degrees) between the trunk direction and the average head direction (average of right ear, left ear, and nose). Indicates cervical flexion (how much the head is tilted relative to the trunk).
+- **stability_margin**: distance (in the XZ plane) between the center of mass and the centroid of the feet (or ankles). Indicates postural "stability".
+- **back_rot**: trunk rotation on the horizontal (XZ) plane, calculated as the angle between the hip line and the shoulder line.
+- **back_flex**: anterior-posterior trunk flexion (in degrees), calculated as the arctan of the X component of the trunk with respect to the vertical axis of the hips.
+- **back_bend**: lateral trunk bending (in degrees), calculated as the arctan of the Z component of the trunk with respect to the vertical axis of the hips.
+
+All angles are expressed in degrees.
+
+
 ## INI settings
 
-The plugin supports the following settings in the INI file:
+The plugin supports the following optional settings in the INI file:
 
 ```ini
 [postural_metrics_assessment]
-# Describe the settings available to the plugin
+# Describe here the settings available for the plugin
 ```
 
-All settings are optional; if omitted, the default values are used.
+All settings are optional; if omitted, default values are used.
 
 
 ## Executable demo
