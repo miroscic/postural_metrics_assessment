@@ -16,6 +16,7 @@
 #include <filter.hpp>
 #include <nlohmann/json.hpp>
 #include <pugg/Kernel.h>
+
 // other includes as needed here
 #include <vector>
 #include <array>
@@ -25,6 +26,10 @@
 // Define the name of the plugin
 #ifndef PLUGIN_NAME
 #define PLUGIN_NAME "postural_metrics_assessment"
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
 #endif
 
 // Load the namespaces
@@ -60,14 +65,195 @@ public:
     return return_type::success;
   }
 
+  return_type compute_horiz_reach() {
+    /*
+    Compute the horizontal reach.
+    */
+
+    // Compute the horizontal reach (left and right) using WRIR and WRIL joints
+    // WRIR: right wrist, WRIL: left wrist
+
+    // check if _com is valid
+    if (_com == Eigen::Vector3d::Zero()) {
+      _error = "Center of mass is not valid.";
+      return return_type::retry;
+    }
+
+    int idx_wr_right = keypoints_map_string2int["WRIR"];
+    int idx_wr_left = keypoints_map_string2int["WRIL"];
+
+    // Check if wrist positions are valid
+    if (_positions[idx_wr_right] == Eigen::Vector3d::Zero() || _positions[idx_wr_left] == Eigen::Vector3d::Zero()) {
+      _error = "Wrist positions are not valid.";
+      return return_type::retry;
+    }
+
+    double dx_r = _com[0] - _positions[idx_wr_right][0];
+    double dz_r = _com[2] - _positions[idx_wr_right][2];
+    _horiz_reach_right = std::sqrt(dx_r * dx_r + dz_r * dz_r);
+
+    double dx_l = _com[0] - _positions[idx_wr_left][0];
+    double dz_l = _com[2] - _positions[idx_wr_left][2];
+    _horiz_reach_left = std::sqrt(dx_l * dx_l + dz_l * dz_l);
+
+    return return_type::success;
+  }
+
+  return_type compute_vert_reach() {
+    /*
+    Compute the vertical reach.
+    */
+
+    int idx_elbr = keypoints_map_string2int["ELBR"];
+    int idx_elbl = keypoints_map_string2int["ELBL"];
+    int idx_shor = keypoints_map_string2int["SHOR"];
+    int idx_shol = keypoints_map_string2int["SHOL"];
+    int idx_nec  = keypoints_map_string2int["NEC_"];
+    int idx_spc  = keypoints_map_string2int["SPC_"];
+
+    // Check if required joint positions are valid
+    if (_positions[idx_elbr] == Eigen::Vector3d::Zero() || _positions[idx_elbl] == Eigen::Vector3d::Zero() ||
+        _positions[idx_shor] == Eigen::Vector3d::Zero() || _positions[idx_shol] == Eigen::Vector3d::Zero() ||
+        _positions[idx_nec]  == Eigen::Vector3d::Zero() || _positions[idx_spc]  == Eigen::Vector3d::Zero()) {
+      _error = "Required joint positions for vertical reach computation are not valid.";
+      return return_type::retry;
+    }
+
+    // Compute vectors
+    Eigen::Vector3d arm_r = _positions[idx_elbr] - _positions[idx_shor];
+    Eigen::Vector3d arm_l = _positions[idx_elbl] - _positions[idx_shol];
+    Eigen::Vector3d torso = _positions[idx_nec] - _positions[idx_spc];
+
+    // Compute vertical reach right
+    double dot_r = torso.dot(arm_r);
+    double norm_torso = torso.norm();
+    double norm_arm_r = arm_r.norm();
+    if (norm_torso > 1e-6 && norm_arm_r > 1e-6) {
+      double angle_r = std::acos(std::clamp(dot_r / (norm_torso * norm_arm_r), -1.0, 1.0));
+      _vert_reach_right = static_cast<float>((M_PI - angle_r) * 180.0 / M_PI);
+    } else {
+      _vert_reach_right = 0.0f;
+    }
+
+    // Compute vertical reach left
+    double dot_l = torso.dot(arm_l);
+    double norm_arm_l = arm_l.norm();
+    if (norm_torso > 1e-6 && norm_arm_l > 1e-6) {
+      double angle_l = std::acos(std::clamp(dot_l / (norm_torso * norm_arm_l), -1.0, 1.0));
+      _vert_reach_left = static_cast<float>((M_PI - angle_l) * 180.0 / M_PI);
+    } else {
+      _vert_reach_left = 0.0f;
+    }
+
+    return return_type::success;
+  }
+
+  return_type compute_cervical_flex() {
+    /*
+    Compute the cervical flexion.
+    */
+
+    // Compute cervical flexion angle using EARR, EARL, NOS_, NEC_, SPC_
+    int idx_earr = keypoints_map_string2int["EARR"];
+    int idx_earl = keypoints_map_string2int["EARL"];
+    int idx_nos  = keypoints_map_string2int["NOS_"];
+    int idx_nec  = keypoints_map_string2int["NEC_"];
+    int idx_spc  = keypoints_map_string2int["SPC_"];
+
+    // Check if required joint positions are valid
+    if (_positions[idx_earr] == Eigen::Vector3d::Zero() ||
+      _positions[idx_earl] == Eigen::Vector3d::Zero() ||
+      _positions[idx_nos]  == Eigen::Vector3d::Zero() ||
+      _positions[idx_nec]  == Eigen::Vector3d::Zero() ||
+      _positions[idx_spc]  == Eigen::Vector3d::Zero()) {
+      _error = "Required joint positions for cervical flexion computation are not valid.";
+      return return_type::retry;
+    }
+
+    // Compute head vector: average(EARR, EARL, NOS_) - NEC_
+    Eigen::Vector3d head_avg = (_positions[idx_earr] + _positions[idx_earl] + _positions[idx_nos]) / 3.0;
+    Eigen::Vector3d head_vec = head_avg - _positions[idx_nec];
+
+    // Compute torso vector: NEC_ - SPC_
+    Eigen::Vector3d torso_vec = _positions[idx_nec] - _positions[idx_spc];
+
+    // Compute angle between torso and head vectors
+    double dot_val = torso_vec.dot(head_vec);
+    double norm_torso = torso_vec.norm();
+    double norm_head = head_vec.norm();
+
+    if (norm_torso > 1e-6 && norm_head > 1e-6) {
+      double angle = std::acos(std::clamp(dot_val / (norm_torso * norm_head), -1.0, 1.0));
+      _cervical_flex = static_cast<float>(angle * 180.0 / M_PI);
+    } else {
+      _cervical_flex = 0.0f;
+    }
+
+    return return_type::success;
+  }
+
+  return_type compute_stability_margin() {
+    /*
+    Compute the stability margin.
+    NOTE: This implementation assumes the presence of ankle and foot joints.
+    If FOOR and FOOL joints are not available, only ANKR and ANKL are used.
+    */
+
+    int idx_ankr = keypoints_map_string2int["ANKR"];
+    int idx_ankl = keypoints_map_string2int["ANKL"];
+    int idx_foor = keypoints_map_string2int.count("FOOR") ? keypoints_map_string2int["FOOR"] : -1;
+    int idx_fool = keypoints_map_string2int.count("FOOL") ? keypoints_map_string2int["FOOL"] : -1;
+
+    // Check if required joints are valid
+    if (_positions[idx_ankr] == Eigen::Vector3d::Zero() ||
+      _positions[idx_ankl] == Eigen::Vector3d::Zero() ||
+      (idx_foor >= 0 && _positions[idx_foor] == Eigen::Vector3d::Zero()) ||
+      (idx_fool >= 0 && _positions[idx_fool] == Eigen::Vector3d::Zero())) {
+      _error = "Required joint positions for stability margin computation are not valid.";
+      return return_type::retry;
+    }
+
+    // Compute average feet position (x, z)
+    std::vector<Eigen::Vector3d> feet_joints;
+    feet_joints.push_back(_positions[idx_ankr]);
+    feet_joints.push_back(_positions[idx_ankl]);
+    if (idx_foor >= 0) feet_joints.push_back(_positions[idx_foor]);
+    if (idx_fool >= 0) feet_joints.push_back(_positions[idx_fool]);
+
+    Eigen::Vector2d feet_avg = Eigen::Vector2d::Zero();
+    for (const auto& pos : feet_joints) {
+      feet_avg[0] += pos[0];
+      feet_avg[1] += pos[2];
+    }
+    feet_avg /= feet_joints.size();
+
+    // COM x, z
+    double com_x = _com[0];
+    double com_z = _com[2];
+
+    // Compute stability margin
+    double dx = com_x - feet_avg[0];
+    double dz = com_z - feet_avg[1];
+    _stability_margin = static_cast<float>(std::sqrt(dx * dx + dz * dz));
+    
+    return return_type::success;
+  }
+
+   return_type compute_back_angles() {
+    /*
+    Compute the back angles.
+    TODO: Implement the actual computation logic. Current implementation is just a print message.
+    */
+    cout << "Computing back angles..." << endl;
+    return return_type::success;
+  }
+
 
   // Typically, no need to change this
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "") override {
-
-    cout << "Loading data" << endl;
     
     // Check if input is of type "FSD" since we only use Merged Skeletons
     if (!input.contains("typ") || input["typ"] != "FSD") {
@@ -75,37 +261,38 @@ public:
       cout << _error << endl;
       return return_type::retry;
     }
-    
-    cout << "Input data is of type FSD." << endl;
 
     
     // store the global timestamp of the input data
     if (input.contains("ts")) {
       _timestamp = input["ts"].get<int64_t>();
-      cout << "Input data timestamp: " << _timestamp << endl;
+      cout << "Timestamp: " << _timestamp << endl;
     } else {
         _error = "Input data does not contain 'ts'.";
         cout << _error << endl;
         return return_type::retry;
     }
 
-    // retrieve the skeleton data just received and update the covariance matrix and joint positions
-    for(const auto &[label, data] : input.items()) {
-      if(data.contains("crd") && data.contains("unc")){
+    const auto message_input = input["message"];
+    for (const auto &[label, data] : message_input.items()) {
+      if (data.contains("crd") && data.contains("unc") &&
+          data["crd"].is_array() && data["crd"].size() >= 3 &&
+          data["unc"].is_array() && data["unc"].size() >= 6) {
         int joint_index = keypoints_map_string2int[label]; // joint index
+        _positions[joint_index] = Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]) / 1000.0; // convert from mm to m
 
-        _positions[joint_index]= Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]);
+        // Print label and values
+        cout << label
+             << ": [" << _positions[joint_index][0] << ", " << _positions[joint_index][1] << ", " << _positions[joint_index][2] << "]"
+             << endl;
 
         Eigen::Matrix3d covariance_matrix = Eigen::Matrix3d::Zero();
         covariance_matrix << data["unc"][0], data["unc"][3], data["unc"][4],
                              data["unc"][3], data["unc"][1], data["unc"][5],
                              data["unc"][4], data["unc"][5], data["unc"][2];
-        _covariances[joint_index] = covariance_matrix;
-
-      }  
+        _covariances[joint_index] = covariance_matrix; // NOTE: covariance is not used currently and the conversion from mm^2 to m^2 is not applied
+      }
     }
-
-    cout << "Updated joint positions and covariances." << endl;
     return return_type::success;
   }
 
@@ -114,10 +301,27 @@ public:
   return_type process(json &out) override {
     out.clear();
 
+    // Compute preprocessing steps
     compute_baricenter();
-    std::cout << "Center of mass: " << _com.transpose() << std::endl;
-    
-    // load the data as necessary and set the fields of the json out variable
+    std::cout << "COM: [" << _com[0] << ", " << _com[1] << ", " << _com[2] << "]" << std::endl;
+
+    // Compute the postural metrics
+    compute_horiz_reach();
+    compute_vert_reach();
+    compute_cervical_flex();
+    compute_stability_margin();
+    compute_back_angles();
+
+    // Store the computed metrics into the output json object
+    out["horiz_reach_left"] = _horiz_reach_left;
+    out["horiz_reach_right"] = _horiz_reach_right;
+    out["vert_reach_left"] = _vert_reach_left;
+    out["vert_reach_right"] = _vert_reach_right;
+    out["cervical_flex"] = _cervical_flex;
+    out["stability_margin"] = _stability_margin;
+    out["back_rot"] = _back_rot;
+    out["back_flex"] = _back_flex;
+    out["back_bend"] = _back_bend;
 
     // This sets the agent_id field in the output json object, only when it is
     // not empty
@@ -147,7 +351,7 @@ public:
     }
 
     // initialize the internal vectors based on the number of cameras
-    size_t num_joints = _params["joint_map"].size();
+    size_t num_joints = joint_map.size();
     _positions.resize(num_joints);
     _covariances.resize(num_joints);
 
@@ -170,12 +374,25 @@ private:
   map<string, int> keypoints_map_string2int;
   map<int, string> keypoints_map_int2string;
 
+  // input data
   int64_t _timestamp = 0; // global timestamp of the input data
-
   std::vector<Eigen::Vector3d> _positions; // _positions[j] is the position (x,y,z) of the j-th joint.
   std::vector<Eigen::Matrix3d> _covariances;  // _covariances[j] is the covariance matrix of the j-th joint.
 
+  // preprocessing 
   Eigen::Vector3d _com;  // Center of mass (COM) of the joint positions
+
+  // output data
+  float _horiz_reach_left = 0.0; // Horizontal reach (left)
+  float _horiz_reach_right = 0.0; // Horizontal reach (right)
+  float _vert_reach_left = 0.0;  // Vertical reach (left)
+  float _vert_reach_right = 0.0;  // Vertical reach (right)
+  float _cervical_flex = 0.0; // Cervical flexion
+  float _stability_margin = 0.0; // Stability margin
+  float _back_rot = 0.0; // Back rotation
+  float _back_flex = 0.0; // Back flexion
+  float _back_bend = 0.0; // Back bending
+
 };
 
 
@@ -226,7 +443,7 @@ int main(int argc, char const *argv[])
   int input_count = 0;
   for (const auto& input : all_inputs) {
     input_count++;
-    cout << "Processing input #" << input_count << ": " << input.dump(2) << endl;
+    cout << "Processing input #" << input_count << endl;
 
     // Set input data
     plugin.load_data(input);
