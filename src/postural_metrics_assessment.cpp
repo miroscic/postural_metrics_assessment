@@ -36,6 +36,11 @@
 using namespace std;
 using json = nlohmann::json;
 
+std::vector<std::string> joint_map = { 
+      "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL",
+      "HIPR","KNER","ANKR","HIPL","KNEL","ANKL",
+      "EYER","EYEL","EARR","EARL"
+    }; // default joint map 
 
 // Plugin class. This shall be the only part that needs to be modified,
 // implementing the actual functionality
@@ -244,7 +249,81 @@ public:
     Compute the back angles.
     TODO: Implement the actual computation logic. Current implementation is just a print message.
     */
-    cout << "Computing back angles..." << endl;
+
+    int idx_hipr = keypoints_map_string2int["HIPR"];
+    int idx_hipl = keypoints_map_string2int["HIPL"];
+    int idx_spn = keypoints_map_string2int["SPN_"];
+    int idx_spc = keypoints_map_string2int["SPC_"];
+    int idx_nec = keypoints_map_string2int["NEC_"];
+    int idx_shor = keypoints_map_string2int["SHOR"];
+    int idx_shol = keypoints_map_string2int["SHOL"];
+
+    // Check required joints
+    if (_positions[idx_hipr] == Eigen::Vector3d::Zero() ||
+      _positions[idx_hipl] == Eigen::Vector3d::Zero() ||
+      _positions[idx_spn] == Eigen::Vector3d::Zero() ||
+      _positions[idx_spc] == Eigen::Vector3d::Zero() ||
+      _positions[idx_nec] == Eigen::Vector3d::Zero() ||
+      _positions[idx_shor] == Eigen::Vector3d::Zero() ||
+      _positions[idx_shol] == Eigen::Vector3d::Zero()) {
+      _error = "Required joint positions for back angle computation are not valid.";
+      return return_type::retry;
+    }
+
+    // torso = average(NEC_, SPC_, SPN_) - average(HIPL, HIPR)
+    Eigen::Vector3d avg_upper = (_positions[idx_nec] + _positions[idx_spc] + _positions[idx_spn]) / 3.0;
+    Eigen::Vector3d avg_hips = (_positions[idx_hipl] + _positions[idx_hipr]) / 2.0;
+    Eigen::Vector3d torso = avg_upper - avg_hips;
+
+    // Yhip_vers = (0, 1, 0)
+    Eigen::Vector3d Yhip_vers(0, 1, 0);
+
+    // Zhip = (HIPR_x - HIPL_x, 0, HIPR_z - HIPL_z)
+    Eigen::Vector3d Zhip(
+      _positions[idx_hipr][0] - _positions[idx_hipl][0],
+      0,
+      _positions[idx_hipr][2] - _positions[idx_hipl][2]
+    );
+    Eigen::Vector3d Zhip_vers = Zhip.normalized();
+
+    // Xhip_vers = Yhip_vers x Zhip_vers
+    Eigen::Vector3d Xhip_vers = Yhip_vers.cross(Zhip_vers);
+
+    // check if Xhip_vers, Yhip_vers, Zhip_vers are ortorhonormal
+    double dot_xy = Xhip_vers.dot(Yhip_vers);
+    double dot_xz = Xhip_vers.dot(Zhip_vers);
+    double dot_yz = Yhip_vers.dot(Zhip_vers);
+
+    // torso_Xhip = dot(torso, Xhip_vers)
+    double torso_Xhip = torso.dot(Xhip_vers);
+    // torso_Yhip = dot(torso, Yhip_vers)
+    double torso_Yhip = torso.dot(Yhip_vers);
+    // torso_Zhip = dot(torso, Zhip_vers)
+    double torso_Zhip = torso.dot(Zhip_vers);
+
+    // back_flex = arctan(torso_Xhip / torso_Yhip)
+    _back_flex = static_cast<float>(std::atan2(torso_Xhip, torso_Yhip) * 180.0 / M_PI);
+    // back_bend = arctan(torso_Zhip / torso_Yhip)
+    _back_bend = static_cast<float>(std::atan2(torso_Zhip, torso_Yhip) * 180.0 / M_PI);
+
+    // shoulders = SHOR - SHOL
+    Eigen::Vector3d shoulders = _positions[idx_shor] - _positions[idx_shol];
+
+    // Zhip_prj = (Zhip_vers_x, Zhip_vers_z)
+    Eigen::Vector2d Zhip_prj(Zhip_vers[0], Zhip_vers[2]);
+    // shoulders_prj = (shoulders_x, shoulders_z)
+    Eigen::Vector2d shoulders_prj(shoulders[0], shoulders[2]);
+
+    double dot_val = Zhip_prj.dot(shoulders_prj);
+    double norm_zhip = Zhip_prj.norm();
+    double norm_sh = shoulders_prj.norm();
+    if (norm_zhip > 1e-6 && norm_sh > 1e-6) {
+      double angle = std::acos(std::clamp(dot_val / (norm_zhip * norm_sh), -1.0, 1.0));
+      _back_rot = static_cast<float>(angle * 180.0 / M_PI);
+    } else {
+      _back_rot = 0.0f;
+    }
+
     return return_type::success;
   }
 
@@ -281,16 +360,18 @@ public:
         int joint_index = keypoints_map_string2int[label]; // joint index
         _positions[joint_index] = Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]) / 1000.0; // convert from mm to m
 
-        // Print label and values
-        cout << label
-             << ": [" << _positions[joint_index][0] << ", " << _positions[joint_index][1] << ", " << _positions[joint_index][2] << "]"
-             << endl;
-
         Eigen::Matrix3d covariance_matrix = Eigen::Matrix3d::Zero();
         covariance_matrix << data["unc"][0], data["unc"][3], data["unc"][4],
                              data["unc"][3], data["unc"][1], data["unc"][5],
                              data["unc"][4], data["unc"][5], data["unc"][2];
         _covariances[joint_index] = covariance_matrix; // NOTE: covariance is not used currently and the conversion from mm^2 to m^2 is not applied
+        
+        /*
+        // Print label and values
+        cout << label
+             << ": [" << _positions[joint_index][0] << ", " << _positions[joint_index][1] << ", " << _positions[joint_index][2] << "]"
+             << endl;
+        */
       }
     }
     return return_type::success;
@@ -303,7 +384,7 @@ public:
 
     // Compute preprocessing steps
     compute_baricenter();
-    std::cout << "COM: [" << _com[0] << ", " << _com[1] << ", " << _com[2] << "]" << std::endl;
+    // std::cout << "COM: [" << _com[0] << ", " << _com[1] << ", " << _com[2] << "]" << std::endl;
 
     // Compute the postural metrics
     compute_horiz_reach();
@@ -337,12 +418,6 @@ public:
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
     _params.merge_patch(*(json *)params);
-
-    std::vector<std::string> joint_map = { 
-      "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL",
-      "HIPR","KNER","ANKR","HIPL","KNEL","ANKL",
-      "EYER","EYEL","EARR","EARL"
-    }; // default joint map 
 
     // creates two maps to faciliate indexing the joints by name and index
     for (size_t i = 0; i < joint_map.size(); ++i) {
@@ -423,15 +498,12 @@ int main(int argc, char const *argv[])
   json params;
   json all_inputs, input, output;
 
-  // Set example values to params
-  params["test"] = "value";
-
   // Set the parameters
   plugin.set_params(&params);
 
   // Set input data
   // read dummy json file
-  ifstream input_file("dummy/hpe_inputs.json");
+  ifstream input_file("dummy/simulated_hpe_inputs.json");
   if (input_file.is_open()) {
     input_file >> all_inputs;
     input_file.close();
