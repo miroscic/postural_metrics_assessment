@@ -335,25 +335,31 @@ public:
   return_type load_data(json const &input, string topic = "") override {
     
     // Check if input is of type "FSD" since we only use Merged Skeletons
-    if (!input.contains("typ") || input["typ"] != "FSD") {
-      _error = "Input data is not a FSD";
+
+    // ORIGINALE QUANDO AVREMO LA FUSIONE FUNZIONANTE
+    //if (!input.contains("typ") || input["typ"] != "FSD") {
+    //_error = "Input data is not a FSD";
+    //  cout << _error << endl;
+    //  return return_type::retry;
+    //}
+
+    // DI PROVA PER TESTARE CON UN HPE SINGOLO
+    if (!input.contains("typ") || input["typ"] != "3D") {
+      _error = "Input data is not a 3D";
       cout << _error << endl;
       return return_type::retry;
     }
 
-    
     // store the global timestamp of the input data
     if (input.contains("ts")) {
       _timestamp = input["ts"].get<int64_t>();
-      cout << "Timestamp: " << _timestamp << endl;
     } else {
         _error = "Input data does not contain 'ts'.";
         cout << _error << endl;
         return return_type::retry;
     }
 
-    const auto message_input = input["message"];
-    for (const auto &[label, data] : message_input.items()) {
+    for (const auto &[label, data] : input.items()) {
       if (data.contains("crd") && data.contains("unc") &&
           data["crd"].is_array() && data["crd"].size() >= 3 &&
           data["unc"].is_array() && data["unc"].size() >= 6) {
@@ -372,6 +378,7 @@ public:
              << ": [" << _positions[joint_index][0] << ", " << _positions[joint_index][1] << ", " << _positions[joint_index][2] << "]"
              << endl;
         */
+        
       }
     }
     return return_type::success;
@@ -403,6 +410,7 @@ public:
     out["back_rot"] = _back_rot;
     out["back_flex"] = _back_flex;
     out["back_bend"] = _back_bend;
+    out["ts"] = _timestamp;
 
     // This sets the agent_id field in the output json object, only when it is
     // not empty

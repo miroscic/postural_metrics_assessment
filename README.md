@@ -117,3 +117,4 @@ All settings are optional; if omitted, default values are used.
 - Adapt the "message" field reading according to the format of hpe_out topic. Probably the "message" field has been added by MongoDB.
 - Check if joints positions are in millimeter or meter. If in meter remove the conversion in load_data()
 - in compute_stability_margin() we should use also FOOR and FOOL, but they are not provided by the current HPE plugin. 
+- Remove the "message" field from dummy json keeping the data 
