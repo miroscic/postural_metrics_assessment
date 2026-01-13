@@ -35,7 +35,11 @@ cmake --install build --config Release
 ```
 
 
+## Development Documentation
+https://docs.google.com/document/d/1L_y-oWhedAmsY2PLjSfawqoiBaRRuhdQzyei1RMjAek/edit?tab=t.0#heading=h.93nb808xxo5y
 
+# TODO
+1. Remove SPN_ and SPN_ joints from the metrics computation
 
 ## Input and Output
 
