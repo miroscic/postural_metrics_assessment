@@ -54,6 +54,7 @@ public:
     TODO: Implement the actual computation logic. Current implementation is just the average of the joint positions.
     */
 
+    
     if (_positions.empty()) {
       _error = "No joint positions available for center of mass computation.";
       return return_type::retry;
@@ -67,8 +68,164 @@ public:
 
     // Store the computed center of mass
     _com = com;
+    
     return return_type::success;
   }
+    
+
+    /*
+    Compute the baricenter (center of mass) of the joint positions.
+    TODO: Implement the actual computation logic. Current implementation is just the average of the joint positions.
+    */
+
+   /*
+ ___       _     _                         _        _ _           _        
+|_ _|_ __ (_)___(_) ___     ___ ___  _ __ | |_ _ __(_) |__  _   _| |_ ___  
+ | || '_ \| |_  / |/ _ \   / __/ _ \| '_ \| __| '__| | '_ \| | | | __/ _ \ 
+ | || | | | |/ /| | (_) | | (_| (_) | | | | |_| |  | | |_) | |_| | || (_) |
+|___|_|_|_|_/___|_|\___/   \___\___/|_| |_|\__|_|  |_|_.__/ \__,_|\__\___/ 
+  __| (_)   ___ _ __  _ __(_) ___ ___                                      
+ / _` | |  / _ \ '_ \| '__| |/ __/ _ \                                     
+| (_| | | |  __/ | | | |  | | (_| (_) |                                    
+ \__,_|_|  \___|_| |_|_|  |_|\___\___/  
+       
+
+    if (_positions.empty()) {
+        _error = "No joint positions available for center of mass computation.";
+        return return_type::retry;
+    }
+
+    // Compute COM for each segment using the Dumas formula
+
+    // NB: @nico  @marco: le posizioni % cambiano da maschio a femmina
+    // in teoria si dovrebbe passare il genere in ingresso alla funzione. 
+    // Per ora ho messo un if all interno 
+
+    // Head-Neck (easy version): just NOS
+    Eigen::Vector3d com_head_neck = NOS;
+
+    // Torso: from NEC to MID HIP, COM at 43.6% (F) or 42% (M) from origin
+    double torso_com_percentage = (_gender == Gender::Female) ? 0.436 : 0.42;
+    Eigen::Vector3d com_torso = compute_segment_com(NEC, MID_HIP, torso_com_percentage);
+    
+    // Arm: from SHO to ELB, COM at 45.4% from origin
+    double arm_com_percentage = (_gender == Gender::Female) ? 0.454 : 0.452;
+    Eigen::Vector3d com_arm_left = compute_segment_com(SHOL, ELBL, arm_com_percentage);
+    Eigen::Vector3d com_arm_right = compute_segment_com(SHOR, ELBR, arm_com_percentage);
+    
+    // Forearm: from ELB to WRI, COM at 41.1% from origin
+    double forearm_com_percentage = (_gender == Gender::Female) ? 0.411 : 0.417;
+    Eigen::Vector3d com_forearm_left = compute_segment_com(ELBL, WRIL, forearm_com_percentage);
+    Eigen::Vector3d com_forearm_right = compute_segment_com(ELBR, WRIR, forearm_com_percentage);
+
+    // Hand (easy version): just HAN
+    Eigen::Vector3d com_hand_left = HANL;
+    Eigen::Vector3d com_hand_right = HANR;
+
+    // Pelvis (easy version): just MID HIP
+    Eigen::Vector3d com_pelvis = MID_HIP;
+
+    // Thigh: from HIP to KNE, COM at 37.7% from origin
+    double thigh_com_percentage = (_gender == Gender::Female) ? 0.377 : 0.429;
+    Eigen::Vector3d com_thigh_left = compute_segment_com(HIPL, KNEL, thigh_com_percentage);
+    Eigen::Vector3d com_thigh_right = compute_segment_com(HIPR, KNER, thigh_com_percentage);
+
+    // Leg (shank): from KNE to ANK, COM at 40.4% from origin
+    double leg_com_percentage = (_gender == Gender::Female) ? 0.404 : 0.429;
+    Eigen::Vector3d com_leg_left = compute_segment_com(KNEL, ANKL, leg_com_percentage);
+    Eigen::Vector3d com_leg_right = compute_segment_com(KNER, ANKR, leg_com_percentage);
+
+    // Foot (easy version): just ANK
+    Eigen::Vector3d com_foot_left = ANKL;
+    Eigen::Vector3d com_foot_right = ANKR;
+
+    // Compute the position of the center of mass as the weighted average of 
+    // the position of each COM of the segments weighted by the mass%
+    double total_mass_percentage = 0.0;
+    Eigen::Vector3d weighted_com = Eigen::Vector3d::Zero();
+
+    // Mass percentages from the anthropometric table
+    weighted_com += com_head_neck * 0.067;
+    weighted_com += com_torso * 0.304;
+    weighted_com += com_arm_left * 0.022;
+    weighted_com += com_arm_right * 0.022;
+    weighted_com += com_forearm_left * 0.013;
+    weighted_com += com_forearm_right * 0.013;
+    weighted_com += com_hand_left * 0.005;
+    weighted_com += com_hand_right * 0.005;
+    weighted_com += com_pelvis * 0.146;
+    weighted_com += com_thigh_left * 0.146;
+    weighted_com += com_thigh_right * 0.146;
+    weighted_com += com_leg_left * 0.043;
+    weighted_com += com_leg_right * 0.043;
+    weighted_com += com_foot_left * 0.015;
+    weighted_com += com_foot_right * 0.015;
+
+    com = weighted_com;
+
+    // Store the computed center of mass
+    _com = com;
+    return return_type::success;
+    return return_type::success;
+  }
+
+  Eigen::Vector3d compute_segment_com(const Eigen::Vector3d& point1, 
+                                     const Eigen::Vector3d& point2, 
+                                     double distance_percentage) {
+    /*
+    Compute the center of mass of a segment defined by two keypoints.
+    
+    Parameters:
+      - point1: First keypoint coordinates (XYZ)
+      - point2: Second keypoint coordinates (XYZ)
+      - distance_percentage: Percentage of distance from point1 to point2 where COM is located
+                            (0.0 = at point1, 0.5 = midpoint, 1.0 = at point2)
+    
+    Returns:
+      - Eigen::Vector3d: The computed center of mass position
+    
+    
+    // Clamp distance_percentage to [0, 1] range with warning if out of bounds
+    if (distance_percentage < 0.0 || distance_percentage > 1.0) {
+      std::cout << "WARNING: distance_percentage " << distance_percentage 
+                << " is out of bounds [0.0, 1.0]. Clamping to valid range." << std::endl;
+      distance_percentage = std::clamp(distance_percentage, 0.0, 1.0);
+    }
+    
+    return point1 + distance_percentage * (point2 - point1);
+  }
+  */
+
+/*
+ _____ _                              _        _ _           _        
+|  ___(_)_ __   ___    ___ ___  _ __ | |_ _ __(_) |__  _   _| |_ ___  
+| |_  | | '_ \ / _ \  / __/ _ \| '_ \| __| '__| | '_ \| | | | __/ _ \ 
+|  _| | | | | |  __/ | (_| (_) | | | | |_| |  | | |_) | |_| | || (_) |
+|_|  _|_|_| |_|\___|  \___\___/|_| |_|\__|_|  |_|_.__/ \__,_|\__\___/ 
+  __| (_)   ___ _ __  _ __(_) ___ ___                                 
+ / _` | |  / _ \ '_ \| '__| |/ __/ _ \                                
+| (_| | | |  __/ | | | |  | | (_| (_) |                               
+ \__,_|_|  \___|_| |_|_|  |_|\___\___/                                
+*/
+
+  return_type compute_mid_hip(){
+    /*
+    Compute the mid hip position as the average of the left and right hip positions.
+    */
+
+    int idx_hipr = keypoints_map_string2int["HIPR"];
+    int idx_hipl = keypoints_map_string2int["HIPL"];
+
+    // Check if hip positions are valid
+    if (_positions[idx_hipr] == Eigen::Vector3d::Zero() || _positions[idx_hipl] == Eigen::Vector3d::Zero()) {
+      _error = "Hip positions are not valid.";
+      return return_type::retry;
+    }
+
+    _mid_hip = 0.5 * (_positions[idx_hipr] + _positions[idx_hipl]);
+
+    return return_type::success;
+  }  
 
   return_type compute_horiz_reach() {
     /*
@@ -97,9 +254,40 @@ public:
     double dz_r = _com[2] - _positions[idx_wr_right][2];
     _horiz_reach_right = std::sqrt(dx_r * dx_r + dz_r * dz_r);
 
+    /*
+    // GUM Uncertainty Propagation
+    // Derivatives of horizontal reach right with respect to right wrist and COM positions
+    d_hr_wrir_x = dx_r / _horiz_reach_right;
+    d_hr_wrir_z = dz_r / _horiz_reach_right;
+    d_hr_com_x = -dx_r / _horiz_reach_right;
+    d_hr_com_z = -dz_r / _horiz_reach_right;
+
+    Eigen::Vector4d J;
+    J << d_hr_wrir_x, d_hr_wrir_z, d_hr_com_x, d_hr_com_z;
+
+    // Define the complete covariance matrix
+    C = Eigen::Matrix4d::Zero();
+
+    C(0, 0) = _covariances[idx_wr_right](0, 0); // Var(WRIR_x)
+    C(1, 1) = _covariances[idx_wr_right](2, 2); // Var(WRIR_z)
+    C(2, 2) = _covariances_com(0, 0); // Var(COM_x) still to be computed in the function compute_baricenter()
+    C(3, 3) = _covariances_com(2, 2); // Var(COM_z) still to be computed in the function compute_baricenter()
+    C(0, 1) = _covariances[idx_wr_right](0, 2); // Cov(WRIR_x, WRIR_z)
+    C(1, 0) = C(0, 1);
+    C(2, 3) = _covariances_com(0, 2); // Cov(COM_x, COM_z)
+    C(3, 2) = C(2, 3);
+
+    // Compute the variance of horizontal reach right
+    double var_hr_right = J.transpose() * C * J;
+    double horiz_reach_right_standard_unc = std::sqrt(var_hr_right);
+    _horiz_reach_right_unc = static_cast<float>(horiz_reach_right_standard_unc)*2.0f; // 95% confidence interval
+
+
     double dx_l = _com[0] - _positions[idx_wr_left][0];
     double dz_l = _com[2] - _positions[idx_wr_left][2];
     _horiz_reach_left = std::sqrt(dx_l * dx_l + dz_l * dz_l);
+
+    */
 
     return return_type::success;
   }
@@ -119,27 +307,104 @@ public:
     // Check if required joint positions are valid
     if (_positions[idx_elbr] == Eigen::Vector3d::Zero() || _positions[idx_elbl] == Eigen::Vector3d::Zero() ||
         _positions[idx_shor] == Eigen::Vector3d::Zero() || _positions[idx_shol] == Eigen::Vector3d::Zero() ||
-        _positions[idx_nec]  == Eigen::Vector3d::Zero() || _positions[idx_spc]  == Eigen::Vector3d::Zero()) {
+        _positions[idx_nec]  == Eigen::Vector3d::Zero() || _mid_hip == Eigen::Vector3d::Zero()) {
       _error = "Required joint positions for vertical reach computation are not valid.";
       return return_type::retry;
     }
 
+    //TODO: change the calculation of torso using mid_hip
+
     // Compute vectors
     Eigen::Vector3d arm_r = _positions[idx_elbr] - _positions[idx_shor];
     Eigen::Vector3d arm_l = _positions[idx_elbl] - _positions[idx_shol];
-    Eigen::Vector3d torso = _positions[idx_nec] - _positions[idx_spc];
+    // Eigen::Vector3d torso = _positions[idx_nec] - _positions[idx_spc]; // old version
+    Eigen::Vector3d torso = _positions[idx_nec] - _mid_hip; // new version using mid_hip, we do not have access to SPC_
+
 
     // Compute vertical reach right
     double dot_r = torso.dot(arm_r);
     double norm_torso = torso.norm();
     double norm_arm_r = arm_r.norm();
+
+    double u_r = dot_r / (norm_torso * norm_arm_r);
+
     if (norm_torso > 1e-6 && norm_arm_r > 1e-6) {
-      double angle_r = std::acos(std::clamp(dot_r / (norm_torso * norm_arm_r), -1.0, 1.0));
-      _vert_reach_right = static_cast<float>((M_PI - angle_r) * 180.0 / M_PI);
+      double teta_r = std::acos(std::clamp(u_r, -1.0, 1.0));
+      _vert_reach_right = static_cast<float>((M_PI - teta_r) * 180.0 / M_PI);
     } else {
       _vert_reach_right = 0.0f;
     }
 
+    /* GUM Uncertainty Propagation for vertical reach right
+    dvr_dteta_r = -1; // dvr_dteta_r = -180.0 
+    dteta_du_r = -1 / std::sqrt(1 - u_r * u_r);
+
+    // Simplified notation
+    P = norm_torso * norm_arm_r;
+    S = dot_r;
+    double P_squared = P * P;
+
+    // Compute derivatives of S (dot product) with respect to joint positions
+    Eigen::Vector3d dS_delb_r = _positions[idx_nec] - _mid_hip;
+    Eigen::Vector3d dS_dsho_r = -(_positions[idx_nec] - _positions[idx_shor]);
+    Eigen::Vector3d dS_dnec_r = _positions[idx_elbr] - _positions[idx_shor];
+    Eigen::Vector3d dS_mid_hip = -(_positions[idx_elbr] - _positions[idx_shor]);
+
+    // dP/dx = norm_arm_r * d(norm_torso)/dx + norm_torso * d(norm_arm_r)/dx
+    // Compute derivatives of torso norm with respect to joint positions
+    Eigen::Vector3d dtorso_dnec = (_positions[idx_nec] - _mid_hip) / norm_torso;
+    Eigen::Vector3d dtorso_mid_hip = -dtorso_dnec;
+    Eigen::Vector3d dtorso_dsho_r = Eigen::Vector3d::Zero();
+    Eigen::Vector3d dtorso_delb_r = Eigen::Vector3d::Zero();
+
+    // Compute derivatives of arm_r norm with respect to joint positions
+    Eigen::Vector3d darm_r_delb_r = (_positions[idx_elbr] - _positions[idx_shor]) / norm_arm_r;
+    Eigen::Vector3d darm_r_dsho_r = -darm_r_delb_r;
+    Eigen::Vector3d darm_r_dnec = Eigen::Vector3d::Zero();
+    Eigen::Vector3d darm_r_mid_hip = Eigen::Vector3d::Zero();
+
+    // Compute derivatives of P (product of norms) with respect to joint positions
+    Eigen::Vector3d dP_delb_r = norm_arm_r * dtorso_delb_r + norm_torso * darm_r_delb_r;
+    Eigen::Vector3d dP_dsho_r = norm_arm_r * dtorso_dsho_r + norm_torso * darm_r_dsho_r;
+    Eigen::Vector3d dP_dnec = norm_arm_r * dtorso_dnec + norm_torso * darm_r_dnec;
+    Eigen::Vector3d dP_mid_hip = norm_arm_r * dtorso_mid_hip + norm_torso * darm_r_mid_hip;
+
+    // Compute derivatives of u (cosine): du/dx = (P*dS/dx - S*dP/dx) / P^2
+    Eigen::Vector3d du_delb_r = (P * dS_delb_r - S * dP_delb_r) / P_squared;
+    Eigen::Vector3d du_dsho_r = (P * dS_dsho_r - S * dP_dsho_r) / P_squared;
+    Eigen::Vector3d du_dnec = (P * dS_dnec_r - S * dP_dnec) / P_squared;
+    Eigen::Vector3d du_mid_hip = (P * dS_mid_hip - S * dP_mid_hip) / P_squared;
+
+    // Apply chain rule: dvr/dx = (dvr/dtheta) * (dtheta/du) * (du/dx)
+    double chain_factor = dvr_dteta_r * dteta_du_r;
+    Eigen::Vector3d dvr_delb_r = chain_factor * du_delb_r;
+    Eigen::Vector3d dvr_dsho_r = chain_factor * du_dsho_r;
+    Eigen::Vector3d dvr_dnec = chain_factor * du_dnec;
+    Eigen::Vector3d dvr_mid_hip = chain_factor * du_mid_hip;
+
+    // Assemble Jacobian vector
+    J = Eigen::VectorXd(12);
+    J << dvr_delb_r, dvr_dsho_r, dvr_dnec, dvr_mid_hip;
+
+    // Define the complete covariance matrix
+    C = Eigen::MatrixXd::Zero(12, 12);
+
+    //TODO: Fill covariance matrix C with appropriate covariance values
+    Eigen::Matrix3d cov_elb_r = _covariances[idx_elbr];
+    Eigen::Matrix3d cov_sho_r = _covariances[idx_shor];
+    Eigen::Matrix3d cov_nec = _covariances[idx_nec];
+    Eigen::Matrix3d cov_mid_hip = _covariances[idx_mid_hip];
+
+    C.block<3, 3>(0, 0) = cov_elb_r;
+    C.block<3, 3>(3, 3) = cov_sho_r;
+    C.block<3, 3>(6, 6) = cov_nec;
+    C.block<3, 3>(9, 9) = cov_mid_hip;
+
+    // Compute the variance of vertical reach right
+    double var_vr_right = J.transpose() * C * J;
+
+    double u_l = dot_l / (norm_torso * norm_arm_l);
+ */
     // Compute vertical reach left
     double dot_l = torso.dot(arm_l);
     double norm_arm_l = arm_l.norm();
@@ -149,6 +414,79 @@ public:
     } else {
       _vert_reach_left = 0.0f;
     }
+
+  /* GUM Uncertainty Propagation for vertical reach left
+
+    dvr_dteta_l = -1; // dvr_dteta_l = -180.0 / M_PI; TODO: check it
+    dteta_du_l = -1 / std::sqrt(1 - u_l * u_l);
+
+    // Simplified notation
+    P = norm_torso * norm_arm_l;
+    S = dot_l;
+    double P_squared = P * P;
+
+    // Compute derivatives of S (dot product) with respect to joint positions
+    Eigen::Vector3d dS_delb_l = _positions[idx_nec] - _positions[idx_mid_hip];
+    Eigen::Vector3d dS_dsho_l = -(_positions[idx_nec] - _positions[idx_shol]);
+    Eigen::Vector3d dS_dnec_l = _positions[idx_elbl] - _positions[idx_shol];
+    Eigen::Vector3d dS_mid_hip = -(_positions[idx_elbl] - _positions[idx_shol]);
+
+    // dP/dx = norm_arm_r * d(norm_torso)/dx + norm_torso * d(norm_arm_r)/dx
+    // Compute derivatives of torso norm with respect to joint positions
+    Eigen::Vector3d dtorso_dnec = (_positions[idx_nec] - _positions[idx_mid_hip]) / norm_torso;
+    Eigen::Vector3d dtorso_mid_hip = -dtorso_dnec;
+    Eigen::Vector3d dtorso_dsho_l = Eigen::Vector3d::Zero();
+    Eigen::Vector3d dtorso_delb_l = Eigen::Vector3d::Zero();
+
+    // Compute derivatives of arm_r norm with respect to joint positions
+    Eigen::Vector3d darm_l_delb_l = (_positions[idx_elbl] - _positions[idx_shol]) / norm_arm_l;
+    Eigen::Vector3d darm_l_dsho_l = -darm_l_delb_l;
+    Eigen::Vector3d darm_l_dnec = Eigen::Vector3d::Zero();
+    Eigen::Vector3d darm_l_mid_hip = Eigen::Vector3d::Zero();
+
+    // Compute derivatives of P (product of norms) with respect to joint positions
+    Eigen::Vector3d dP_delb_l = norm_arm_l * dtorso_delb_l + norm_torso * darm_l_delb_l;
+    Eigen::Vector3d dP_dsho_l = norm_arm_l * dtorso_dsho_l + norm_torso * darm_l_dsho_l;
+    Eigen::Vector3d dP_dnec = norm_arm_l * dtorso_dnec + norm_torso * darm_l_dnec;
+    Eigen::Vector3d dP_mid_hip = norm_arm_l * dtorso_mid_hip + norm_torso * darm_l_mid_hip;
+
+    // Compute derivatives of u (cosine): du/dx = (P*dS/dx - S*dP/dx) / P^2
+    Eigen::Vector3d du_delb_l = (P * dS_delb_l - S * dP_delb_l) / P_squared;
+    Eigen::Vector3d du_dsho_l = (P * dS_dsho_l - S * dP_dsho_l) / P_squared;
+    Eigen::Vector3d du_dnec = (P * dS_dnec - S * dP_dnec) / P_squared;
+    Eigen::Vector3d du_mid_hip = (P * dS_mid_hip - S * dP_mid_hip) / P_squared;
+
+    // Apply chain rule: dvr/dx = (dvr/dtheta) * (dtheta/du) * (du/dx)
+    double chain_factor = dvr_dteta_l * dteta_du_l;
+    Eigen::Vector3d dvr_delb_l = chain_factor * du_delb_l;
+    Eigen::Vector3d dvr_dsho_l = chain_factor * du_dsho_l;
+    Eigen::Vector3d dvr_dnec = chain_factor * du_dnec;
+    Eigen::Vector3d dvr_mid_hip = chain_factor * du_mid_hip;
+
+    // Assemble Jacobian vector
+    J = Eigen::VectorXd(12);
+    J << dvr_delb_l, dvr_dsho_l, dvr_dnec, dvr_mid_hip;
+
+    // Define the complete covariance matrix
+    C = Eigen::MatrixXd::Zero(12, 12);
+
+    //TODO: Fill covariance matrix C with appropriate covariance values
+    Eigen::Matrix3d cov_elb_l = _covariances[idx_elbl];
+    Eigen::Matrix3d cov_sho_l = _covariances[idx_shol];
+    Eigen::Matrix3d cov_nec = _covariances[idx_nec];
+    Eigen::Matrix3d cov_mid_hip = _covariances[idx_mid_hip];
+
+    C.block<3, 3>(0, 0) = cov_elb_l;
+    C.block<3, 3>(3, 3) = cov_sho_l;
+    C.block<3, 3>(6, 6) = cov_nec;
+    C.block<3, 3>(9, 9) = cov_mid_hip;
+
+    // Compute the variance of vertical reach right
+    double var_vr_left = J.transpose() * C * J;
+
+    // Standard uncertainty
+    double vert_reach_right_standard_unc = std::sqrt(var_vr_right);
+    */
 
     return return_type::success;
   }
@@ -170,7 +508,7 @@ public:
       _positions[idx_earl] == Eigen::Vector3d::Zero() ||
       _positions[idx_nos]  == Eigen::Vector3d::Zero() ||
       _positions[idx_nec]  == Eigen::Vector3d::Zero() ||
-      _positions[idx_spc]  == Eigen::Vector3d::Zero()) {
+      _mid_hip == Eigen::Vector3d::Zero()) {
       _error = "Required joint positions for cervical flexion computation are not valid.";
       return return_type::retry;
     }
@@ -180,19 +518,89 @@ public:
     Eigen::Vector3d head_vec = head_avg - _positions[idx_nec];
 
     // Compute torso vector: NEC_ - SPC_
-    Eigen::Vector3d torso_vec = _positions[idx_nec] - _positions[idx_spc];
+    Eigen::Vector3d torso_vec = _positions[idx_nec] - _mid_hip; // we do not have access to SPC_
 
     // Compute angle between torso and head vectors
     double dot_val = torso_vec.dot(head_vec);
     double norm_torso = torso_vec.norm();
     double norm_head = head_vec.norm();
 
+    double u = dot_val / (norm_torso * norm_head);
+
     if (norm_torso > 1e-6 && norm_head > 1e-6) {
-      double angle = std::acos(std::clamp(dot_val / (norm_torso * norm_head), -1.0, 1.0));
+      double angle = std::acos(std::clamp(u, -1.0, 1.0));
       _cervical_flex = static_cast<float>(angle * 180.0 / M_PI);
     } else {
       _cervical_flex = 0.0f;
     }
+    
+    /*
+    // GUM Uncertainty Propagation
+    // Simplified notation
+    double P = norm_torso * norm_head;
+    double S = dot_val;
+
+    // CF = arccos(u)
+    // dCF_dxi = dCF_du * du_dxi
+    double dcf_du = -1 / std::sqrt(1 - u * u);
+
+    //du_dxi = (P * dS_dxi - S * dP_dxi) / P^2
+    
+    // Compute derivatives of S (dot product) with respect to joint positions
+    Eigen::Vector3d dS_dearr = torso_vec / 3.0;
+    Eigen::Vector3d dS_dearl = torso_vec / 3.0;
+    Eigen::Vector3d dS_dnos  = torso_vec / 3.0;
+    Eigen::Vector3d dS_dnec = - head_vec - torso_vec;
+    Eigen::Vector3d dS_dmid_hip = - head_vec;
+  
+    // Compute derivatives of P (product of norms) with respect to joint positions
+    // dP/dx = norm_torso * d(norm_head)/dx + norm_head * d(norm_torso)/dx  
+    Eigen::Vector3d dP_d_earr = norm_torso * head_vec / norm_head / 3.0;
+    Eigen::Vector3d dP_d_earl = norm_torso * head_vec / norm_head / 3.0;
+    Eigen::Vector3d dP_d_nos  = norm_torso * head_vec / norm_head / 3.0;
+    Eigen::Vector3d dP_d_nec = (norm_head * torso_vec / norm_torso) - (norm_torso * head_vec / norm_head);
+    Eigen::Vector3d dP_d_mid_hip = - (norm_head * torso_vec / norm_torso);
+
+    // Compute du/dxi
+    Eigen::Vector3d du_dearr = (P * dS_dearr - S * dP_d_earr) / (P * P);
+    Eigen::Vector3d du_dearl = (P * dS_dearl - S * dP_d_earl) / (P * P);
+    Eigen::Vector3d du_dnos  = (P * dS_dnos  - S * dP_d_nos ) / (P * P);
+    Eigen::Vector3d du_dnec  = (P * dS_dnec  - S * dP_d_nec ) / (P * P);
+    Eigen::Vector3d du_dmid_hip = (P * dS_dmid_hip - S * dP_d_mid_hip) / (P * P);
+
+    // Apply chain rule to get dCF/dxi
+    Eigen::Vector3d dcf_dearr = dcf_du * du_dearr;
+    Eigen::Vector3d dcf_dearl = dcf_du * du_dearl;
+    Eigen::Vector3d dcf_dnos  = dcf_du * du_dnos ;
+    Eigen::Vector3d dcf_dnec  = dcf_du * du_dnec ;
+    Eigen::Vector3d dcf_dmid_hip = dcf_du * du_dmid_hip;
+
+    // Jacobian vector
+    Eigen::VectorXd J(15);
+    J << dcf_dearr, dcf_dearl, dcf_dnos, dcf_dnec, dcf_dmid_hip;
+
+    // Define the complete covariance matrix
+    Eigen::MatrixXd C = Eigen::MatrixXd::Zero(15, 15);
+ 
+    Eigen::Matrix3d cov_earr = _covariances[idx_earr];
+    Eigen::Matrix3d cov_earl = _covariances[idx_earl];
+    Eigen::Matrix3d cov_nos  = _covariances[idx_nos];
+    Eigen::Matrix3d cov_nec = _covariances[idx_nec];
+    Eigen::Matrix3d cov_mid_hip = _covariances[idx_mid_hip];
+
+    C.block<3, 3>(0, 0) = cov_earr;
+    C.block<3, 3>(3, 3) = cov_earl;
+    C.block<3, 3>(6, 6) = cov_nos;
+    C.block<3, 3>(9, 9) = cov_nec;
+    C.block<3, 3>(12, 12) = cov_mid_hip;
+
+    // Compute the variance of cervical flexion
+    double var_cf = J.transpose() * C * J;
+
+    // Standard uncertainty
+    double cervical_flex_standard_unc = std::sqrt(var_cf);
+
+    */
 
     return return_type::success;
   }
@@ -240,7 +648,38 @@ public:
     double dx = com_x - feet_avg[0];
     double dz = com_z - feet_avg[1];
     _stability_margin = static_cast<float>(std::sqrt(dx * dx + dz * dz));
+
+    /* GUM Uncertainty Propagation
+    dSM_dcom_x = dx / _stability_margin;
+    dSM_dcom_z = dz / _stability_margin;
+
+    dSM_dankl_x = -(dx) / (_stability_margin * 2.0);
+    dSM_dankl_z = -(dz) / (_stability_margin * 2.0);
     
+    dSM_dankr_x = -(dx) / (_stability_margin * 2.0);
+    dSM_dankr_z = -(dz) / (_stability_margin * 2.0);
+
+    J = Eigen::Vector9d();
+    J << dSM_dcom_x, 0, dSM_dcom_z, dSM_dankl_x, 0, dSM_dankl_z, dSM_dankr_x, 0, dSM_dankr_z;
+
+    // Define the complete covariance matrix
+    C = Eigen::Matrix9d::Zero();
+    
+    Eigen::Matrix3d cov_ankl = _covariances[idx_ankl];
+    Eigen::Matrix3d cov_ankr = _covariances[idx_ankr];
+
+    C.block<3, 3>(0, 0) = _covariances_com;
+    C.block<3, 3>(3, 3) = cov_ankl;
+    C.block<3, 3>(6, 6) = cov_ankr;
+
+    // Compute the variance of stability margin
+    double var_sm = J.transpose() * C * J;
+
+    double stability_margin_standard_unc = std::sqrt(var_sm);
+
+    _stability_margin_unc = static_cast<float>(stability_margin_standard_unc)*2.0f; // 95% confidence interval
+    */
+
     return return_type::success;
   }
 
@@ -248,12 +687,14 @@ public:
     /*
     Compute the back angles.
     TODO: Implement the actual computation logic. Current implementation is just a print message.
+
+    TODO: GUM Uncertainty Propagation for the 3 back angles computation. 
     */
 
     int idx_hipr = keypoints_map_string2int["HIPR"];
     int idx_hipl = keypoints_map_string2int["HIPL"];
-    int idx_spn = keypoints_map_string2int["SPN_"];
-    int idx_spc = keypoints_map_string2int["SPC_"];
+    // int idx_spn = keypoints_map_string2int["SPN_"];
+    // int idx_spc = keypoints_map_string2int["SPC_"];
     int idx_nec = keypoints_map_string2int["NEC_"];
     int idx_shor = keypoints_map_string2int["SHOR"];
     int idx_shol = keypoints_map_string2int["SHOL"];
@@ -261,8 +702,9 @@ public:
     // Check required joints
     if (_positions[idx_hipr] == Eigen::Vector3d::Zero() ||
       _positions[idx_hipl] == Eigen::Vector3d::Zero() ||
-      _positions[idx_spn] == Eigen::Vector3d::Zero() ||
-      _positions[idx_spc] == Eigen::Vector3d::Zero() ||
+      //_positions[idx_spn] == Eigen::Vector3d::Zero() ||
+      //_positions[idx_spc] == Eigen::Vector3d::Zero() ||
+      _mid_hip == Eigen::Vector3d::Zero() ||
       _positions[idx_nec] == Eigen::Vector3d::Zero() ||
       _positions[idx_shor] == Eigen::Vector3d::Zero() ||
       _positions[idx_shol] == Eigen::Vector3d::Zero()) {
@@ -270,10 +712,12 @@ public:
       return return_type::retry;
     }
 
+    // old version
     // torso = average(NEC_, SPC_, SPN_) - average(HIPL, HIPR)
-    Eigen::Vector3d avg_upper = (_positions[idx_nec] + _positions[idx_spc] + _positions[idx_spn]) / 3.0;
-    Eigen::Vector3d avg_hips = (_positions[idx_hipl] + _positions[idx_hipr]) / 2.0;
-    Eigen::Vector3d torso = avg_upper - avg_hips;
+    //Eigen::Vector3d avg_upper = (_positions[idx_nec] + _positions[idx_spc] + _positions[idx_spn]) / 3.0;
+    //Eigen::Vector3d avg_hips = (_positions[idx_hipl] + _positions[idx_hipr]) / 2.0;
+
+    Eigen::Vector3d torso = _positions[idx_nec] - _mid_hip; // we do not have access to SPC_ and SPN_, so we use mid_hip instead of average(hipl, hipr)
 
     // Yhip_vers = (0, 1, 0)
     Eigen::Vector3d Yhip_vers(0, 1, 0);
@@ -370,8 +814,8 @@ public:
         covariance_matrix << data["unc"][0], data["unc"][3], data["unc"][4],
                              data["unc"][3], data["unc"][1], data["unc"][5],
                              data["unc"][4], data["unc"][5], data["unc"][2];
-        _covariances[joint_index] = covariance_matrix; // NOTE: covariance is not used currently and the conversion from mm^2 to m^2 is not applied
-        
+        // convert from mm^2 to m^2
+        _covariances[joint_index] = covariance_matrix / 1e6;
         /*
         // Print label and values
         cout << label
@@ -418,14 +862,14 @@ public:
     return return_type::success;
   }
   
-  void set_params(void const *params) override {
+  void set_params(const json &params) override {
     // Call the parent class method to set the common parameters 
     // (e.g. agent_id, etc.)
     Filter::set_params(params);
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
-    _params.merge_patch(*(json *)params);
+    _params.merge_patch(params);
 
     // creates two maps to faciliate indexing the joints by name and index
     for (size_t i = 0; i < joint_map.size(); ++i) {
@@ -440,7 +884,7 @@ public:
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
-    _params.merge_patch(*(json *)params);
+    _params.merge_patch(params);
 
   }
 
@@ -461,9 +905,11 @@ private:
   int64_t _timestamp = 0; // global timestamp of the input data
   std::vector<Eigen::Vector3d> _positions; // _positions[j] is the position (x,y,z) of the j-th joint.
   std::vector<Eigen::Matrix3d> _covariances;  // _covariances[j] is the covariance matrix of the j-th joint.
+  std::vector<Eigen::Matrix3d> _covariances_com;  // covariance matrix of the center of mass (COM)
 
   // preprocessing 
   Eigen::Vector3d _com;  // Center of mass (COM) of the joint positions
+  Eigen::Vector3d _mid_hip; // Mid hip position (average of HIPL and HIPR)
 
   // output data
   float _horiz_reach_left = 0.0; // Horizontal reach (left)
@@ -507,7 +953,7 @@ int main(int argc, char const *argv[])
   json all_inputs, input, output;
 
   // Set the parameters
-  plugin.set_params(&params);
+  plugin.set_params(params);
 
   // Set input data
   // read dummy json file
