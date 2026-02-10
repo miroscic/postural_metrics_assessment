@@ -282,12 +282,11 @@ public:
     double horiz_reach_right_standard_unc = std::sqrt(var_hr_right);
     _horiz_reach_right_unc = static_cast<float>(horiz_reach_right_standard_unc)*2.0f; // 95% confidence interval
 
-
+    */
+   
     double dx_l = _com[0] - _positions[idx_wr_left][0];
     double dz_l = _com[2] - _positions[idx_wr_left][2];
     _horiz_reach_left = std::sqrt(dx_l * dx_l + dz_l * dz_l);
-
-    */
 
     return return_type::success;
   }
