@@ -53,7 +53,8 @@ public:
     Compute the baricenter (center of mass) of the joint positions.
     TODO: Implement the actual computation logic. Current implementation is just the average of the joint positions.
     */
-
+   
+    /* OLD VERSION without weighting the com with anthropometric table, just the average of the joint positions
     
     if (_positions.empty()) {
       _error = "No joint positions available for center of mass computation.";
@@ -71,24 +72,7 @@ public:
     
     return return_type::success;
   }
-    
-
-    /*
-    Compute the baricenter (center of mass) of the joint positions.
-    TODO: Implement the actual computation logic. Current implementation is just the average of the joint positions.
     */
-
-   /*
- ___       _     _                         _        _ _           _        
-|_ _|_ __ (_)___(_) ___     ___ ___  _ __ | |_ _ __(_) |__  _   _| |_ ___  
- | || '_ \| |_  / |/ _ \   / __/ _ \| '_ \| __| '__| | '_ \| | | | __/ _ \ 
- | || | | | |/ /| | (_) | | (_| (_) | | | | |_| |  | | |_) | |_| | || (_) |
-|___|_|_|_|_/___|_|\___/   \___\___/|_| |_|\__|_|  |_|_.__/ \__,_|\__\___/ 
-  __| (_)   ___ _ __  _ __(_) ___ ___                                      
- / _` | |  / _ \ '_ \| '__| |/ __/ _ \                                     
-| (_| | | |  __/ | | | |  | | (_| (_) |                                    
- \__,_|_|  \___|_| |_|_|  |_|\___\___/  
-       
 
     if (_positions.empty()) {
         _error = "No joint positions available for center of mass computation.";
@@ -101,43 +85,57 @@ public:
     // in teoria si dovrebbe passare il genere in ingresso alla funzione. 
     // Per ora ho messo un if all interno 
 
-    // Head-Neck (easy version): just NOS
-    Eigen::Vector3d com_head_neck = NOS;
+    //Head-Neck (easy version): just NOS
+    int idx_nos  = keypoints_map_string2int["NOS_"];
+    Eigen::Vector3d com_head_neck = _positions[idx_nos];
 
     // Torso: from NEC to MID HIP, COM at 43.6% (F) or 42% (M) from origin
-    double torso_com_percentage = (_gender == Gender::Female) ? 0.436 : 0.42;
-    Eigen::Vector3d com_torso = compute_segment_com(NEC, MID_HIP, torso_com_percentage);
+    double torso_com_percentage = 0.42;
+    Eigen::Vector3d neck = _positions[keypoints_map_string2int["NEC_"]];
+    Eigen::Vector3d mid_hip = _mid_hip; // computed in compute_mid_hip()
+    
+    Eigen::Vector3d com_torso = compute_segment_com(neck, mid_hip, torso_com_percentage);
     
     // Arm: from SHO to ELB, COM at 45.4% from origin
-    double arm_com_percentage = (_gender == Gender::Female) ? 0.454 : 0.452;
-    Eigen::Vector3d com_arm_left = compute_segment_com(SHOL, ELBL, arm_com_percentage);
-    Eigen::Vector3d com_arm_right = compute_segment_com(SHOR, ELBR, arm_com_percentage);
+    double arm_com_percentage = 0.452;
+    Eigen::Vector3d shor = _positions[keypoints_map_string2int["SHOR"]];
+    Eigen::Vector3d shol = _positions[keypoints_map_string2int["SHOL"]];
+    Eigen::Vector3d elbl = _positions[keypoints_map_string2int["ELBL"]];
+    Eigen::Vector3d elbr = _positions[keypoints_map_string2int["ELBR"]];
+
+    Eigen::Vector3d com_arm_left = compute_segment_com(shol, elbl, arm_com_percentage);
+    Eigen::Vector3d com_arm_right = compute_segment_com(shor, elbr, arm_com_percentage);
     
     // Forearm: from ELB to WRI, COM at 41.1% from origin
-    double forearm_com_percentage = (_gender == Gender::Female) ? 0.411 : 0.417;
-    Eigen::Vector3d com_forearm_left = compute_segment_com(ELBL, WRIL, forearm_com_percentage);
-    Eigen::Vector3d com_forearm_right = compute_segment_com(ELBR, WRIR, forearm_com_percentage);
-
-    // Hand (easy version): just HAN
-    Eigen::Vector3d com_hand_left = HANL;
-    Eigen::Vector3d com_hand_right = HANR;
+    double forearm_com_percentage = 0.417;
+    Eigen::Vector3d wril = _positions[keypoints_map_string2int["WRIL"]];
+    Eigen::Vector3d wrir = _positions[keypoints_map_string2int["WRIR"]];
+    Eigen::Vector3d com_forearm_left = compute_segment_com(elbl, wril, forearm_com_percentage);
+    Eigen::Vector3d com_forearm_right = compute_segment_com(elbr, wrir, forearm_com_percentage);
 
     // Pelvis (easy version): just MID HIP
-    Eigen::Vector3d com_pelvis = MID_HIP;
+    Eigen::Vector3d com_pelvis = _mid_hip;
 
     // Thigh: from HIP to KNE, COM at 37.7% from origin
-    double thigh_com_percentage = (_gender == Gender::Female) ? 0.377 : 0.429;
-    Eigen::Vector3d com_thigh_left = compute_segment_com(HIPL, KNEL, thigh_com_percentage);
-    Eigen::Vector3d com_thigh_right = compute_segment_com(HIPR, KNER, thigh_com_percentage);
+    double thigh_com_percentage = 0.429;
+    Eigen::Vector3d hipl = _positions[keypoints_map_string2int["HIPL"]];
+    Eigen::Vector3d hipr = _positions[keypoints_map_string2int["HIPR"]];
+    Eigen::Vector3d knel = _positions[keypoints_map_string2int["KNEL"]];
+    Eigen::Vector3d kner = _positions[keypoints_map_string2int["KNER"]];
+    
+    Eigen::Vector3d com_thigh_left = compute_segment_com(hipl, knel, thigh_com_percentage);
+    Eigen::Vector3d com_thigh_right = compute_segment_com(hipr, kner, thigh_com_percentage);
 
     // Leg (shank): from KNE to ANK, COM at 40.4% from origin
-    double leg_com_percentage = (_gender == Gender::Female) ? 0.404 : 0.429;
-    Eigen::Vector3d com_leg_left = compute_segment_com(KNEL, ANKL, leg_com_percentage);
-    Eigen::Vector3d com_leg_right = compute_segment_com(KNER, ANKR, leg_com_percentage);
+    double leg_com_percentage = 0.429;
+    Eigen::Vector3d ankl = _positions[keypoints_map_string2int["ANKL"]];
+    Eigen::Vector3d ankr = _positions[keypoints_map_string2int["ANKR"]];
+    Eigen::Vector3d com_leg_left = compute_segment_com(knel, ankl, leg_com_percentage);
+    Eigen::Vector3d com_leg_right = compute_segment_com(kner, ankr, leg_com_percentage);
 
     // Foot (easy version): just ANK
-    Eigen::Vector3d com_foot_left = ANKL;
-    Eigen::Vector3d com_foot_right = ANKR;
+    Eigen::Vector3d com_foot_left = ankl;
+    Eigen::Vector3d com_foot_right = ankr;
 
     // Compute the position of the center of mass as the weighted average of 
     // the position of each COM of the segments weighted by the mass%
@@ -151,8 +149,6 @@ public:
     weighted_com += com_arm_right * 0.022;
     weighted_com += com_forearm_left * 0.013;
     weighted_com += com_forearm_right * 0.013;
-    weighted_com += com_hand_left * 0.005;
-    weighted_com += com_hand_right * 0.005;
     weighted_com += com_pelvis * 0.146;
     weighted_com += com_thigh_left * 0.146;
     weighted_com += com_thigh_right * 0.146;
@@ -161,11 +157,9 @@ public:
     weighted_com += com_foot_left * 0.015;
     weighted_com += com_foot_right * 0.015;
 
-    com = weighted_com;
-
     // Store the computed center of mass
-    _com = com;
-    return return_type::success;
+    _com = weighted_com;
+
     return return_type::success;
   }
 
@@ -183,7 +177,7 @@ public:
     
     Returns:
       - Eigen::Vector3d: The computed center of mass position
-    
+    */
     
     // Clamp distance_percentage to [0, 1] range with warning if out of bounds
     if (distance_percentage < 0.0 || distance_percentage > 1.0) {
@@ -194,7 +188,7 @@ public:
     
     return point1 + distance_percentage * (point2 - point1);
   }
-  */
+  
 
 /*
  _____ _                              _        _ _           _        
@@ -283,7 +277,7 @@ public:
     _horiz_reach_right_unc = static_cast<float>(horiz_reach_right_standard_unc)*2.0f; // 95% confidence interval
 
     */
-   
+
     double dx_l = _com[0] - _positions[idx_wr_left][0];
     double dz_l = _com[2] - _positions[idx_wr_left][2];
     _horiz_reach_left = std::sqrt(dx_l * dx_l + dz_l * dz_l);
@@ -510,7 +504,8 @@ public:
     }
 
     // Compute head vector: average(EARR, EARL, NOS_) - NEC_
-    Eigen::Vector3d head_avg = (_positions[idx_earr] + _positions[idx_earl] + _positions[idx_nos]) / 3.0;
+    //Eigen::Vector3d head_avg = (_positions[idx_earr] + _positions[idx_earl] + _positions[idx_nos]) / 3.0;
+    Eigen::Vector3d head_avg = (_positions[idx_earr] + _positions[idx_earl]) / 2.0;
     Eigen::Vector3d head_vec = head_avg - _positions[idx_nec];
 
     // Compute torso vector: NEC_ - SPC_
@@ -859,11 +854,11 @@ public:
   return_type process(json &out) override {
     out.clear();
 
+    compute_mid_hip();
     // Compute preprocessing steps
     compute_baricenter();
     // std::cout << "COM: [" << _com[0] << ", " << _com[1] << ", " << _com[2] << "]" << std::endl;
-    compute_mid_hip();
-
+  
     // Compute the postural metrics
     compute_horiz_reach();
     compute_vert_reach();
