@@ -302,7 +302,6 @@ public:
     int idx_shor = keypoints_map_string2int["SHOR"];
     int idx_shol = keypoints_map_string2int["SHOL"];
     int idx_nec  = keypoints_map_string2int["NEC_"];
-    int idx_spc  = keypoints_map_string2int["SPC_"];
 
     // Check if required joint positions are valid
     if (_positions[idx_elbr] == Eigen::Vector3d::Zero() || _positions[idx_elbl] == Eigen::Vector3d::Zero() ||
@@ -317,7 +316,6 @@ public:
     // Compute vectors
     Eigen::Vector3d arm_r = _positions[idx_elbr] - _positions[idx_shor];
     Eigen::Vector3d arm_l = _positions[idx_elbl] - _positions[idx_shol];
-    // Eigen::Vector3d torso = _positions[idx_nec] - _positions[idx_spc]; // old version
     Eigen::Vector3d torso = _positions[idx_nec] - _mid_hip; // new version using mid_hip, we do not have access to SPC_
 
 
@@ -501,7 +499,6 @@ public:
     int idx_earl = keypoints_map_string2int["EARL"];
     int idx_nos  = keypoints_map_string2int["NOS_"];
     int idx_nec  = keypoints_map_string2int["NEC_"];
-    int idx_spc  = keypoints_map_string2int["SPC_"];
 
     // Check if required joint positions are valid
     if (_positions[idx_earr] == Eigen::Vector3d::Zero() ||
@@ -693,8 +690,6 @@ public:
 
     int idx_hipr = keypoints_map_string2int["HIPR"];
     int idx_hipl = keypoints_map_string2int["HIPL"];
-    // int idx_spn = keypoints_map_string2int["SPN_"];
-    // int idx_spc = keypoints_map_string2int["SPC_"];
     int idx_nec = keypoints_map_string2int["NEC_"];
     int idx_shor = keypoints_map_string2int["SHOR"];
     int idx_shol = keypoints_map_string2int["SHOL"];
@@ -702,8 +697,6 @@ public:
     // Check required joints
     if (_positions[idx_hipr] == Eigen::Vector3d::Zero() ||
       _positions[idx_hipl] == Eigen::Vector3d::Zero() ||
-      //_positions[idx_spn] == Eigen::Vector3d::Zero() ||
-      //_positions[idx_spc] == Eigen::Vector3d::Zero() ||
       _mid_hip == Eigen::Vector3d::Zero() ||
       _positions[idx_nec] == Eigen::Vector3d::Zero() ||
       _positions[idx_shor] == Eigen::Vector3d::Zero() ||
@@ -711,11 +704,6 @@ public:
       _error = "Required joint positions for back angle computation are not valid.";
       return return_type::retry;
     }
-
-    // old version
-    // torso = average(NEC_, SPC_, SPN_) - average(HIPL, HIPR)
-    //Eigen::Vector3d avg_upper = (_positions[idx_nec] + _positions[idx_spc] + _positions[idx_spn]) / 3.0;
-    //Eigen::Vector3d avg_hips = (_positions[idx_hipl] + _positions[idx_hipr]) / 2.0;
 
     Eigen::Vector3d torso = _positions[idx_nec] - _mid_hip; // we do not have access to SPC_ and SPN_, so we use mid_hip instead of average(hipl, hipr)
 
@@ -777,19 +765,17 @@ public:
 
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "") override {
+
+    // Check if input has a "message" field and use it as the actual data
+    json data_to_process = input;
+    if (input.contains("message") && input["message"].is_object()) {
+      data_to_process = input["message"];
+    }
     
     // Check if input is of type "FSD" since we only use Merged Skeletons
 
-    // ORIGINALE QUANDO AVREMO LA FUSIONE FUNZIONANTE
-    //if (!input.contains("typ") || input["typ"] != "FSD") {
-    //_error = "Input data is not a FSD";
-    //  cout << _error << endl;
-    //  return return_type::retry;
-    //}
-
-    // DI PROVA PER TESTARE CON UN HPE SINGOLO
-    if (!input.contains("typ") || input["typ"] != "3D") {
-      _error = "Input data is not a 3D";
+    if (!input.contains("typ") || input["typ"] != "FSD") {
+      _error = "Input data is not a FSD";
       cout << _error << endl;
       return return_type::retry;
     }
@@ -803,27 +789,68 @@ public:
         return return_type::retry;
     }
 
-    for (const auto &[label, data] : input.items()) {
-      if (data.contains("crd") && data.contains("unc") &&
-          data["crd"].is_array() && data["crd"].size() >= 3 &&
-          data["unc"].is_array() && data["unc"].size() >= 6) {
+    if (input.contains("joints") && input["joints"].is_object()) {
+      // we iterate over the joints in the input json object and store their positions and covariances in the internal vectors
+      
+      for (const auto &[label, data] : input["joints"].items()) {
+
+        cout << "Processing joint: " << label << endl;
+
+        if (!data["crd"].is_array() || !data["unc"].is_array()) {
+          continue;
+        }
+
+        if (data["crd"].size() != 3 || data["unc"].size() != 6) {
+          continue;
+        }
+
+        // Check if all coordinate values are valid numbers (not empty strings)
+        bool crd_valid = true;
+        for (size_t i = 0; i < 3; ++i) {
+          if (!data["crd"][i].is_number()) {
+            crd_valid = false;
+            break;
+          }
+        }
+
+        // Check if all covariance values are valid numbers (not empty strings)
+        bool unc_valid = true;
+        for (size_t i = 0; i < 6; ++i) {
+          if (!data["unc"][i].is_number()) {
+            unc_valid = false;
+            break;
+          }
+        }
+
+        if (!crd_valid || !unc_valid) {
+          continue;
+        }
+
+        // At this point, we have valid data
+        if (keypoints_map_string2int.find(label) == keypoints_map_string2int.end()) {
+          continue;
+        }
+
         int joint_index = keypoints_map_string2int[label]; // joint index
+
         _positions[joint_index] = Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]) / 1000.0; // convert from mm to m
 
         Eigen::Matrix3d covariance_matrix = Eigen::Matrix3d::Zero();
         covariance_matrix << data["unc"][0], data["unc"][3], data["unc"][4],
-                             data["unc"][3], data["unc"][1], data["unc"][5],
-                             data["unc"][4], data["unc"][5], data["unc"][2];
+                            data["unc"][3], data["unc"][1], data["unc"][5],
+                            data["unc"][4], data["unc"][5], data["unc"][2];
         // convert from mm^2 to m^2
-        _covariances[joint_index] = covariance_matrix / 1e6;
-        /*
+        //_covariances[joint_index] = covariance_matrix / 1e6;
+        
         // Print label and values
         cout << label
-             << ": [" << _positions[joint_index][0] << ", " << _positions[joint_index][1] << ", " << _positions[joint_index][2] << "]"
-             << endl;
-        */
-        
-      }
+            << ": [" << _positions[joint_index][0] << ", " << _positions[joint_index][1] << ", " << _positions[joint_index][2] << "]"
+            << endl;
+            
+          }
+    } else {
+      cout << "Input data does not contain 'joints' or it is not an object." << endl;
+      return return_type::retry;
     }
     return return_type::success;
   }
@@ -836,6 +863,7 @@ public:
     // Compute preprocessing steps
     compute_baricenter();
     // std::cout << "COM: [" << _com[0] << ", " << _com[1] << ", " << _com[2] << "]" << std::endl;
+    compute_mid_hip();
 
     // Compute the postural metrics
     compute_horiz_reach();
@@ -880,11 +908,7 @@ public:
     // initialize the internal vectors based on the number of cameras
     size_t num_joints = joint_map.size();
     _positions.resize(num_joints);
-    _covariances.resize(num_joints);
-
-    // then merge the defaults with the actually provided parameters
-    // params needs to be cast to json
-    _params.merge_patch(params);
+    //_covariances.resize(num_joints);
 
   }
 
@@ -904,8 +928,8 @@ private:
   // input data
   int64_t _timestamp = 0; // global timestamp of the input data
   std::vector<Eigen::Vector3d> _positions; // _positions[j] is the position (x,y,z) of the j-th joint.
-  std::vector<Eigen::Matrix3d> _covariances;  // _covariances[j] is the covariance matrix of the j-th joint.
-  std::vector<Eigen::Matrix3d> _covariances_com;  // covariance matrix of the center of mass (COM)
+  //std::vector<Eigen::Matrix3d> _covariances;  // _covariances[j] is the covariance matrix of the j-th joint.
+  //std::vector<Eigen::Matrix3d> _covariances_com;  // covariance matrix of the center of mass (COM)
 
   // preprocessing 
   Eigen::Vector3d _com;  // Center of mass (COM) of the joint positions
